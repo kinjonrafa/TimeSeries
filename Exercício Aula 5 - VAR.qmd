@@ -1,10 +1,6 @@
-|                                                    |                            |
-|----------------------------------------------|-------------------------:|
-| ![](contextual%20learning%20experience%20logo.png) | ![](FGV%20EESP%20Logo.png) |
-
 ---
 title: "Exercício Aula 5 - VAR"
-authors: "RAFAEL DA SILVA, GUSTAVO JOSE MAZZOTTI MARTINS, CESAR AFONSO APARECIDO"
+authors: "RAFAEL DA SILVA"
 format: html
 editor: visual
 ---
