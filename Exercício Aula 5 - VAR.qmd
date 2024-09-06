@@ -1,0 +1,568 @@
+|                                                    |                            |
+|----------------------------------------------|-------------------------:|
+| ![](contextual%20learning%20experience%20logo.png) | ![](FGV%20EESP%20Logo.png) |
+
+---
+title: "Exercício Aula 5 - VAR"
+authors: "RAFAEL DA SILVA, GUSTAVO JOSE MAZZOTTI MARTINS, CESAR AFONSO APARECIDO"
+format: html
+editor: visual
+---
+
+## Motivação
+
+Suponha que você seja um analista em uma instituição financeira responsável por desenvolver estratégias de captação de recursos e planejamento de funding.
+
+Uma das principais preocupações do banco é garantir uma base sólida de depósitos, que constitui uma importante fonte de recursos para financiar suas operações.
+
+Sua tarefa é utilizar um modelo VAR para analisar as relações entre variáveis macroeconômicas e os depósitos totais.
+
+O objetivo é prever como diferentes choques econômicos podem impactar esses depósitos, auxiliando o banco a planejar estratégias de captação e alocação de recursos de maneira eficiente.
+
+Sua análise fornecerá uma perspectiva sobre o crescimento potencial dos depósitos no mercado, o que permitirá à instituição estimar o volume de funding que poderá captar e, assim, realizar um planejamento estratégico informado, fundamentando as decisões de curto e médio prazo.
+
+## Exercício
+
+Considerando as séries trimestrais dos Depósitos Totais, PIB, Selic, IPCA e Desemprego, entre 2013 e 2024, realize as atividades descritas a seguir.
+
+Carregando as bibliotecas necessárias
+
+```{r}
+library(dplyr)          # Manipulação de dados em tabelas de dados
+library(tidyr)          # Manipulação de dados em tabelas de dados
+library(data.table)     # Manipulação de dados em tabelas de dados
+library(GetBCBData)     # Acesso aos dados do Banco Central do Brasil
+library(sidrar)         # Acesso aos dados do IBGE/SIDRA
+library(zoo)            # Manipulação de séries temporais
+library(tseries)        # Manipulação de séries temporais
+library(ggplot2)        # Manipulação de gráficos
+library(urca)           # Execução de testes estatísticos
+library(vars)           # Estimar modelos VAR
+```
+
+Obtendo os dados do Banco Central do Brasil
+
+```{r}
+dados_bacen = data.table(gbcbd_get_series(
+  id = c(Selic = 4189, 
+         IPCA_12M = 13522, 
+         Desemprego = 24369, 
+         Dep_Vista = 27790,
+         Dep_Poup = 1835,
+         Dep_Prazo = 27805),
+  
+  first.date = "2010-01-01", #Data inicial dos dados
+  last.date = "2024-03-31",  #Data final dos dados
+  format.data = "wide"       #Formato dos dados em colunas separadas
+))
+```
+
+-   Extraindo o último dia de cada mês para cada série
+
+-   Preenchendo os valores NA com o último valor não-NA disponível
+
+-   Mantendo apenas o último dia de cada mês
+
+-   Convertendo a data para o formato ano-mês
+
+-   Realizando um filtro para manter apenas os últimos dias de março, junho, setembro e dezembro
+
+    ```{r}
+    #Adiciona a Coluna Data para futuras operações
+    dados_bacen[, Data:= ref.date]
+
+    #Preenche valores NA com o último valor não-NA disponivel
+    dados_bacen = dados_bacen[, lapply(.SD, function(x){zoo::na.locf(x, fromLast = FALSE)})]
+
+    #Mantem apenas o último dia de cada mês
+    dados_bacen = dados_bacen[, .SD[.N], by = .(year(ref.date),month(ref.date))]
+
+    #Converte a data para o formato ano-mês
+    dados_bacen[, Data := as.yearmon(Data)]
+
+    #Filtra para manter apenas os últimos dias de março, junho, setembro e dezembro
+    dados_bacen = dados_bacen[month %in% c(3,6,9,12)]
+    ```
+
+-   Calculando os depósitos totais
+
+-   Calculando a variação anual (year-over-year) dos depósitos totais
+
+-   calculando a variação anual do desemprego
+
+-   Calculando a diferença anual do IPCA (inflação)
+
+-   Calculando a diferença logarítmica da taxa Selic
+
+```{r}
+
+#Somando todos os tipos de depósitos
+dados_bacen[, Dep_Total := Dep_Vista + Dep_Prazo + Dep_Poup]
+
+#Criando coluna com a variação year-over-year dos depósitos
+dados_bacen[, Dep_Total_yoy := ((Dep_Total/dplyr::lag(Dep_Total,4))-1)*100]
+
+#Calculando a variação anual da taxa de desemprego
+dados_bacen[, Desemprego_yoy := ((Desemprego/dplyr::lag(Desemprego,4))-1)*100]
+
+
+#Calculando a diferença anual do IPCA (Inflação)
+dados_bacen[, IPCA_12M_diff := c(NA, diff(IPCA_12M))]
+
+#Calculando a diferença logarítmica da taxa Selic
+dados_bacen[, Selic_diff := c(NA, diff(log(Selic)))]
+```
+
+Obtendo os dados do PIB do IBGE / SIDRA
+
+```{r}
+pib_yoy = data.table(get_sidra(api = "/t/5932/n1/all/v/6561/p/all/c11255/90707/d/v6561%201"))
+
+#Renomeando as colunas e formatando as colunas de datas
+pib_yoy = pib_yoy[, .(Data = `Trimestre (Código)`, PIB_yoy = Valor)]
+
+pib_yoy[, Data:= as.yearmon(paste0(substr(Data,1,4),"-",as.numeric(substr(Data, 6, 6))*3))]
+```
+
+Mesclando os dados do PIB com os dados do Banco Central
+
+```{r}
+data_macro = pib_yoy[dados_bacen, on = "Data"]
+
+#Removendo colunas auxiliares nao necessárias
+data_macro[, year := NULL]
+data_macro[, month := NULL]
+```
+
+Filtrando os dados para o periodo apos março de 2013
+
+```{r}
+data_macro = data_macro[Data >= "mar 2013", .(Data, Dep_Total_yoy, PIB_yoy, Desemprego_yoy, Selic_diff, IPCA_12M_diff)]
+```
+
+Garantindo que os valores da coluna Data sejam um formato de data
+
+```{r}
+data_macro[, Data := as.Date(as.yearmon(Data))]
+```
+
+Transformando os dados para o formato longo
+
+```{r}
+data_long <- pivot_longer(data_macro,
+                          cols = -Data,
+                          names_to = "Variable",
+                          values_to = "Value")
+```
+
+Plotando os Gráficos das Séries
+
+```{r}
+ggplot(data_long, aes(x = Data, y = Value, group = Variable, color = Variable)) + 
+  geom_line() + 
+  facet_wrap(~ Variable, scales = "free_y" , ncol = 4) + #Ajuste o numero #das colunas
+ scale_x_date(
+   breaks = scales::date_breaks("1 year"), #Ajuste Intervalo dos Rotulos
+   labels = scales::date_format("%Y") # Formatacao dos Rotulos
+ ) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  labs(x = "Tempo", y = "Valor", title = "Series Temporais com Eixos Separados") + theme(legend.position = "none")
+```
+
+## 1 -) Agora que as séries foram carregadas, ajustadas e visualizadas, vamos prosseguir com as seguintes análises:
+
+### a. Verifique se as séries temporais das variáveis macroeconômicas são estacionárias.
+
+-   Utilize o teste ADF com a função adf.test(), o teste KPSS com a função ur.kpss(), e o teste
+
+-   Phillips-Perron com a função pp.test().
+
+-   Apresente os resultados dos testes e discuta as transformações aplicadas.
+
+**Função para Aplicação do Teste ADF nas séries**
+
+```{r}
+apply_adf <- function(data, var) {
+  result <- adf.test(na.omit(data[[var]]))
+  p_value <- result$p.value
+  #Decidindo se a série e estacionária com base no p-valor
+  stationary <- ifelse(p_value < 0.05, "Sim","Não")
+  return(data.table(variable = var, test = "ADF", p_value = p_value, stationary = stationary))
+}
+```
+
+**Função para aplicação do teste KPSS**
+
+```{r}
+apply_kpss <- function(data, var){
+  result <- ur.kpss(na.omit(data[[var]]), type = "mu")
+  p_value <- result@teststat
+  critical_value <- result@cval[2]
+  stationary <- ifelse(p_value < critical_value, "Não","Sim")
+  return(data.table(variable = var, test = "KPSS", p_value = p_value, stationary = stationary))
+}
+```
+
+**Função para Aplicação do teste Phillips-Perron**
+
+```{r}
+apply_pp <- function(data, var){
+  result <- pp.test(na.omit(data[[var]]))
+  p_value <- result$p.value
+  stationary <- ifelse(p_value < 0.05, "Sim", "Não")
+  return(data.table(variable = var, test = "PP", p_value = p_value, stationary = stationary))
+}
+```
+
+```{r}
+colunas <- names(data_macro)
+print(colunas)
+```
+
+**Aplicando os testes ADF, KPSS e PP na variável "Dep_Total_yoy", podemos verificar que esta serie é não estacionária.**
+
+**Para ajustar, vamos aplicar a diferenciação e realizar os testes novamente.**
+
+```{r}
+apply_adf(data_macro,"Dep_Total_yoy")
+apply_kpss(data_macro,"Dep_Total_yoy")
+apply_pp (data_macro,"Dep_Total_yoy")
+```
+
+**Aplicando a diferenciação no campo "Dep_Total_yoy"**
+
+```{r}
+#Calculando a diferença no campo "Dep_Total_yoy"
+data_macro[, Dep_Total_yoy_diff := c(NA, diff(Dep_Total_yoy))]
+```
+
+**Aplicando os testes novamente, podemos confirmar a estacionariedade da série.**
+
+```{r}
+apply_adf(data_macro,"Dep_Total_yoy_diff")
+apply_kpss(data_macro,"Dep_Total_yoy_diff")
+apply_pp (data_macro,"Dep_Total_yoy_diff")
+```
+
+**Aplicando os testes ADF, KPSS e PP na variável "PIB_yoy" podemos avaliar que os testes ADF e PP indicam que a série é estacionária.**
+
+```{r}
+apply_adf(data_macro,"PIB_yoy")
+apply_kpss(data_macro,"PIB_yoy")
+apply_pp (data_macro,"PIB_yoy")
+```
+
+**Aplicando os testes ADF, KPSS e PP na variável "Desemprego_yoy", podemos verificar que esta série é não estacionária de acordo com os resultados dos testes ADF e PP. Vamos aplicar a diferenciação nesta série e realizar novamente o teste.**
+
+```{r}
+apply_adf(data_macro,"Desemprego_yoy")
+apply_kpss(data_macro,"Desemprego_yoy")
+apply_pp (data_macro,"Desemprego_yoy")
+```
+
+**Aplicando a diferenciação na no campo "Desemprego_yoy"**
+
+```{r}
+#Calculando a diferença no campo "Desemprego_yoy"
+data_macro[, Desemprego_yoy_diff := c(NA, diff(Desemprego_yoy))]
+
+#Aplicando os testes ADF, KPSS e PP na série diferenciada
+apply_adf(data_macro,"Desemprego_yoy_diff")
+apply_kpss(data_macro,"Desemprego_yoy_diff")
+apply_pp (data_macro,"Desemprego_yoy_diff")
+```
+
+**Após a diferenciação a série se tornou estacionária**
+
+**Aplicando os testes ADF, KPSS e PP na variável "Selic_diff", podemos rejeitar a hipótese nula, portanto a série não possui raiz unitária, sendo assim estacionária.**
+
+```{r}
+apply_adf(data_macro,"Selic_diff")
+apply_kpss(data_macro,"Selic_diff")
+apply_pp (data_macro,"Selic_diff")
+```
+
+**Aplicando os testes ADF, KPSS e PP na variável "IPCA_12M_diff"**
+
+```{r}
+apply_adf(data_macro,"IPCA_12M_diff")
+apply_kpss(data_macro,"IPCA_12M_diff")
+apply_pp (data_macro,"IPCA_12M_diff")
+```
+
+### b. Com as séries estacionárias, determine a ordem ótima do modelo VAR utilizando a função
+
+-   VARselect() para avaliar os critérios de informação como AIC e BIC.
+
+-   Considere também a parcimônia do modelo ao escolher a ordem final.
+
+-   Explique a escolha da ordem do modelo e como os critérios de informação influenciaram essa decisão.
+
+Removendo as colunas sem os valores diferenciados e realizando ajustes no dataset
+
+```{r}
+data_macro_filtered <-na.omit(data_macro[, c("Data", "PIB_yoy", "Selic_diff", "IPCA_12M_diff", "Dep_Total_yoy_diff", "Desemprego_yoy_diff")])
+
+# Remover a coluna de Data se ela for não numérica
+data_macro_filtered_numeric <- data_macro_filtered %>% dplyr::select(-Data)
+```
+
+**Plotando todas as séries após a diferenciação:**
+
+```{r}
+data_long_2 <- pivot_longer(data_macro_filtered,
+                          cols = -Data,
+                          names_to = "Variable",
+                          values_to = "Value")
+
+ggplot(data_long_2, aes(x = Data, y = Value, group = Variable, color = Variable)) + 
+  geom_line() + 
+  facet_wrap(~ Variable, scales = "free_y" , ncol = 4) + #Ajuste o numero #das colunas
+ scale_x_date(
+   breaks = scales::date_breaks("1 year"), #Ajuste Intervalo dos Rotulos
+   labels = scales::date_format("%Y") # Formatacao dos Rotulos
+ ) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  labs(x = "Tempo", y = "Valor", title = "Series Temporais com Eixos Separados") + theme(legend.position = "none")
+```
+
+**Executando o VARselect e analisando o resultado:**
+
+```{r}
+mdl_var_aic <- VARselect(data_macro_filtered_numeric, lag.max = 5, type = "const")
+print(mdl_var_aic)
+```
+
+**Analisando o resultado podemos extrair os seguintes insights:**
+
+Quanto mais lags incluimos no range de estimacao do VARselect, maior os lags sugeridos pelos testes.
+
+Seguindo a premissa de tentarmos estimar um modelo mais parcimonioso possivel, selecionamos 5 lags, pois com esta quantidade de lags, o criterio BIC sugere apenas 1 lag para estimarmos o modelo.
+
+-   Critérios de seleção Akaike, Hannan-Quinn e FPE indicam um modelo com 5 lags
+
+-   O critério SC(n) Schwars (BIC) indica um modelo com 1 lag.
+
+**Vamos estimar 3 modelos, um considerando os 5 lags sugeridos pela maioria dos critérios de seleção, um considerando 2 lags e 1 considerando apenas 1 lag, e vamos comparar os resultados.**
+
+-   **Estimando um modelo VAR(1)**
+
+```{r}
+var_1lag <- VAR(data_macro_filtered_numeric, p = 1, type = "none")
+summary(var_1lag)
+```
+
+-   **Estimando um modelo VAR(2)**
+
+```{r}
+var_2lags <- VAR(data_macro_filtered_numeric, p = 2, type = "none")
+summary(var_2lags)
+```
+
+-   **Estimando um modelo VAR(5)**
+
+```{r}
+var_5lags <- VAR(data_macro_filtered_numeric, p = 5, type = "none")
+summary(var_5lags)
+```
+
+**A equação considerando a taxa selic diferenciada como variável objetivo se apresentou a mais representativa do ponto de vista coeficientes com maior peso no modelo.**
+
+```         
+Dep_Total_yoy_diff.l1  -0.013224   0.004603  -2.873 0.006621 **  Desemprego_yoy_diff.l1  0.006709   0.001818   3.690 0.000701 ***
+```
+
+```         
+Estimation results for equation Selic_diff:  ===========================================  Selic_diff = PIB_yoy.l1 + Selic_diff.l1 + IPCA_12M_diff.l1 + Dep_Total_yoy_diff.l1 + Desemprego_yoy_diff.l1 
+```
+
+**Porém, conforme solicita o enunciado, o modelo que estamos procurando estimar é um que permita realizarmos as previsões de depósitos bancários contra alguns indicadores macro econômicos:**
+
+**Resultados dos modelos estimados considerando 1, 2 e 5 lags:**
+
+**Modelo estimado para 1 lag**
+
+```         
+Estimation results for equation Dep_Total_yoy_diff:  ===================================================  
+Dep_Total_yoy_diff = PIB_yoy.l1 + Selic_diff.l1 + IPCA_12M_diff.l1 + Dep_Total_yoy_diff.l1 + Desemprego_yoy_diff.l1                                                      Estimate   Std. Error t value Pr(>|t|)     
+PIB_yoy.l1              0.302796   0.213980   1.415 0.165191    
+Selic_diff.l1           2.064378   4.906456   0.421 0.676310     IPCA_12M_diff.l1       -0.009948   0.502216  -0.020 0.984300     Dep_Total_yoy_diff.l1   0.786042   0.208278   3.774 0.000549 *** Desemprego_yoy_diff.l1 -0.174621   0.082280  -2.122 0.040391 *   
+--- Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1 
+```
+
+**Modelo estimado para 2 lags**
+
+```         
+Estimation results for equation Dep_Total_yoy_diff:  =================================================== 
+Dep_Total_yoy_diff = PIB_yoy.l1 + Selic_diff.l1 + IPCA_12M_diff.l1 + Dep_Total_yoy_diff.l1 + Desemprego_yoy_diff.l1 + PIB_yoy.l2 + Selic_diff.l2 + IPCA_12M_diff.l2 + Dep_Total_yoy_diff.l2 + Desemprego_yoy_diff.l2
+
+Estimate Std. Error t value Pr(>|t|)     
+PIB_yoy.l1               0.48612    0.30181   1.611 0.117069     
+Selic_diff.l1          -11.91690    9.56029  -1.246 0.221629     IPCA_12M_diff.l1        -0.03071    0.49275  -0.062 0.950688     Dep_Total_yoy_diff.l1    0.90510    0.23127   3.914 0.000446 *** Desemprego_yoy_diff.l1  -0.14545    0.09945  -1.463 0.153349     
+PIB_yoy.l2              -0.46409    0.28257  -1.642 0.110302     
+Selic_diff.l2            6.24686    7.80254   0.801 0.429257     IPCA_12M_diff.l2        -0.11782    0.53562  -0.220 0.827288     Dep_Total_yoy_diff.l2   -0.60325    0.23771  -2.538 0.016226 *   Desemprego_yoy_diff.l2   0.10127    0.11339   0.893 0.378465     
+--- Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1 
+```
+
+**Modelo estimado com 5 lags**
+
+```         
+Estimation results for equation Dep_Total_yoy_diff:  ===================================================  
+Dep_Total_yoy_diff = PIB_yoy.l1 + Selic_diff.l1 + IPCA_12M_diff.l1 + Dep_Total_yoy_diff.l1 + Desemprego_yoy_diff.l1 + PIB_yoy.l2 + Selic_diff.l2 + IPCA_12M_diff.l2 + Dep_Total_yoy_diff.l2 + Desemprego_yoy_diff.l2 + PIB_yoy.l3 + Selic_diff.l3 + IPCA_12M_diff.l3 + Dep_Total_yoy_diff.l3 + Desemprego_yoy_diff.l3 + PIB_yoy.l4 + Selic_diff.l4 + IPCA_12M_diff.l4 + Dep_Total_yoy_diff.l4 + Desemprego_yoy_diff.l4 + PIB_yoy.l5 + Selic_diff.l5 + IPCA_12M_diff.l5 + Dep_Total_yoy_diff.l5 + Desemprego_yoy_diff.l5                            
+                         Estimate   Std. Error t value Pr(>|t|)   
+PIB_yoy.l1               0.614865   0.447166   1.375   0.1907   
+Selic_diff.l1           -3.922029  13.535992  -0.290   0.7763   IPCA_12M_diff.l1        -0.168279   1.059263  -0.159   0.8760   Dep_Total_yoy_diff.l1    0.690489   0.438943   1.573   0.1380   Desemprego_yoy_diff.l1  -0.171768   0.096925  -1.772   0.0981 . 
+PIB_yoy.l2               0.035242   0.499247   0.071   0.9447   
+Selic_diff.l2           -0.451442  12.767587  -0.035   0.9723   IPCA_12M_diff.l2         0.269889   0.734806   0.367   0.7189   Dep_Total_yoy_diff.l2   -0.310029   0.432528  -0.717   0.4853   Desemprego_yoy_diff.l2   0.126057   0.147711   0.853   0.4078   
+PIB_yoy.l3              -0.165683   0.446124  -0.371   0.7159   
+Selic_diff.l3           -1.792296  15.289485  -0.117   0.9083   IPCA_12M_diff.l3         0.455217   0.602235   0.756   0.4623   Dep_Total_yoy_diff.l3    0.013249   0.297106   0.045   0.9651   Desemprego_yoy_diff.l3  -0.228870   0.178855  -1.280   0.2215   
+PIB_yoy.l4              -0.180729   0.397722  -0.454   0.6565   
+Selic_diff.l4          -10.433410  15.105278  -0.691   0.5010   IPCA_12M_diff.l4        -0.428392   0.594391  -0.721   0.4829   Dep_Total_yoy_diff.l4   -0.770234   0.382016  -2.016   0.0634 . Desemprego_yoy_diff.l4  -0.075713   0.159657  -0.474   0.6427   
+PIB_yoy.l5              -0.309734   0.370976  -0.835   0.4178   
+Selic_diff.l5           10.371405  12.196283   0.850   0.4094   IPCA_12M_diff.l5        -0.687658   1.044578  -0.658   0.5210   Dep_Total_yoy_diff.l5   -0.059056   0.364430  -0.162   0.8736   Desemprego_yoy_diff.l5  -0.005524   0.179158  -0.031   0.9758   
+--- Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1 
+```
+
+Como podemos verificar, os modelos mais parcimoniosos tendem a responder melhor nossas perguntas, demonstrando que os coeficientes relacionados aos lags anteriores dos depósitos bem como o desemprego assumem relevância estatística bem como influência no valor presente da série objetivo.
+
+De qualquer forma, para que possamos estimar um modelo mais robusto, cabe explorar mais variáveis macro-econômicas para identificar coeficientes estimadores melhores para explicar a série objetivo.
+
+### c. Estime o modelo VAR com a ordem escolhida utilizando a função VAR() do pacote vars.
+
+-   Analise a estabilidade do modelo verificando as raízes dos polinômios com a função roots(), garantindo que estejam dentro do círculo unitário.
+
+-   Realize o diagnóstico dos resíduos para verificar a presença de autocorrelação (serial.test()), normalidade (normality.test()) e heterocedasticidade (arch.test()).
+
+-   Apresente e discuta os resultados, incluindo a interpretação dos coeficientes estimados.
+
+**Vamos executar os testes para avaliacao da estabilidade dos modelos**
+
+**Verificando as raizes dos polinomios**
+
+**Raízes dos polinômios do modelo com 1 lag:**
+
+```{r}
+roots_1lag <- roots(var_1lag)
+print(roots_1lag)
+```
+
+**Raízes dos polinômios do modelo com 2 lags:**
+
+```{r}
+roots_2lags <- roots(var_2lags)
+print(roots_2lags)
+```
+
+**Raízes dos polinômios do modelo com 5 lags:**
+
+```{r}
+roots_5lags <- roots(var_5lags)
+print(roots_5lags)
+```
+
+Analisando as raizes podemos verificar que todas possuem valores menores que 1, portanto, ambos os modelos sao estaveis.
+
+**Vamos realizar o os diagnosticos nos residuos dos modelos.**
+
+-   **Realizando o teste Portmanteau no modelo com 1 lag**
+
+```{r}
+serial_test_1lag <- serial.test(var_1lag , lags.pt = 25, type = "PT.asymptotic")
+print(serial_test_1lag)
+```
+
+-   Realizando o teste Portmanteau no modelo com 2 lags
+
+    ```{r}
+    serial_test_2lags <- serial.test(var_2lags , lags.pt = 25, type = "PT.asymptotic")
+    print(serial_test_2lags)
+    ```
+
+-   **Realizando o teste Portmanteau no modelo com 5 lags**
+
+```{r}
+serial_test_5lags <- serial.test(var_5lags , lags.pt = 25, type = "PT.asymptotic")
+print(serial_test_5lags)
+```
+
+Analisando os retornos, pecebemos que quanto maior os lags especificados no teste, mais os residuos se aproximam de um comportamento semelhante a um ruido branco.
+
+com a mesma quantidade de lags, os modelos que utilizam menos lags tem os ruidos com menor autocorrelação, indicando que o modelo mais parcimonioso apresenta um comportamento residual mais estável.
+
+**Vamos aplicar o teste de normalidade.**
+
+```{r}
+normalidade_1lag <- normality.test(var_1lag)
+print(normalidade_1lag)
+```
+
+```{r}
+normalidade_5lags <- normality.test(var_5lags)
+print(normalidade_5lags)
+```
+
+Avaliando os resultados podemos notar que o modelo que considera apenas 1 lag tem um comportamento melhor, porem, os valores discrepantes denotam que o modelo ainda pode ser melhorado.
+
+Verificando os testes de heterocedasticidade.
+
+**Modelo com 1 lag**
+
+```{r}
+heterocedasticidade_1lag <- arch.test(var_1lag)
+print(heterocedasticidade_1lag)
+```
+
+**Modelo com 5 lags**
+
+```{r}
+heterocedasticidade_5lags <- arch.test(var_5lags)
+print(heterocedasticidade_5lags)
+```
+
+Avaliando os p-valores de ambos os modelos, chegamos a conclusao de que a variancia dos residuos e constante ao longo do tempo.
+
+## 2. Para explorar os resultados da modelagem, prossiga com as seguintes análises:
+
+### a. Baseando-se no modelo VAR estimado, realize previsões para os próximos quatro trimestres para cada uma das variáveis utilizando a função predict(). 
+
+-   Apresente os intervalos de confiança para essas previsões e discuta a robustez dos resultados, considerando a incerteza associada.
+
+**Previsões:**
+
+-   **Previsão dos próximos 4 trimestres para o modelo estimado com 1 lag**
+
+```{r}
+var_predict_1lag <- predict(var_1lag, n.ahead = 4)
+plot(var_predict_1lag)
+print(var_predict_1lag)
+```
+
+-   **Previsão dos próximos 4 trimestres para o modelo estimado com 2 lags**
+
+```{r}
+var_predict_2lags <- predict(var_2lags, n.ahead = 4)
+plot(var_predict_2lags)
+print(var_predict_2lags)
+```
+
+Previsão dos próximos 4 trimestres para o modelo estimado com 5 lags
+
+```{r}
+var_predict_5lags <- predict(var_5lags, n.ahead = 4)
+plot(var_predict_5lags)
+print(var_predict_5lags)
+```
+
+b.  Utilize a função fevd() para realizar a decomposição da variância dos erros de previsão. Explique como cada uma das variáveis contribui para a variação nos Depósitos Totais. Discuta a importância dessas contribuições para a compreensão da dinâmica econômica.
+
+```{r}
+
+```
+
+### 
+
+c.  Utilize a função irf() para calcular as funções de impulso-resposta, com foco nos impactos de choques no PIB sobre os Depósitos Totais. Analise e discuta como esses resultados podem ser utilizados para informar as estratégias de funding da instituição, especialmente em cenários de crescimento econômico. Considere como a instituição pode se preparar para capturar uma maior parcela de mercado de depósitos, e quais estratégias de alocação de recursos podem ser recomendadas com base nos resultados obtidos.
+
+```{r}
+
+```
